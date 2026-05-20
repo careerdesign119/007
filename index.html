@@ -6,9 +6,6 @@
 <title>LIVE LEADERBOARD</title>
 
 <script>
-/* ================================
-
-================================ */
 const API_URL = "https://script.google.com/macros/s/AKfycbz1QFRZlMxe4eIvPJMcc_DlvkpJtB8R8snxlKueGPCNoQuDoE-mS_QMjZKI8895SgUF/exec";
 const POLL_MS = 2000;
 </script>
@@ -126,7 +123,6 @@ body::after {
   50%      { opacity: 0.1; }
 }
 
-/* ★ 수정: flex 컨테이너로 변경해서 CSS order가 동작하도록 */
 #board {
   width: 100%;
   max-width: 760px;
@@ -177,8 +173,12 @@ body::after {
   cursor: default;
 }
 
+.row.moving-front {
+  z-index: 10;
+}
+
 .row:hover {
-  transform: translateX(3px) !important;
+  transform: translateX(3px);
 }
 
 .row[data-rank="1"] {
@@ -469,12 +469,6 @@ body::after {
   margin-bottom: 0.6rem;
 }
 
-.ov-amount-wrap {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5em;
-}
-
 .ov-amount {
   font-family: 'Bebas Neue', sans-serif;
   font-size: clamp(4rem, 16vw, 11rem);
@@ -487,14 +481,6 @@ body::after {
   filter: drop-shadow(0 0 40px rgba(255,120,0,0.45));
 }
 
-.ov-currency {
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: clamp(1.4rem, 5vw, 3.5rem);
-  letter-spacing: 0.12em;
-  color: rgba(255,255,255,0.5);
-  padding-bottom: 0.5em;
-}
-
 .ov-close-hint {
   position: absolute;
   bottom: 2.5rem;
@@ -504,7 +490,6 @@ body::after {
   color: rgba(255,255,255,0.18);
 }
 
-/* 배경 글로우 */
 #funding-overlay::before {
   content: '';
   position: absolute;
@@ -537,16 +522,12 @@ body::after {
     <div class="stat">TICK <em id="s-tick">0</em></div>
   </div>
 </div>
-</div>
 
 <!-- FUNDING OVERLAY -->
 <div id="funding-overlay" role="dialog" aria-modal="true">
-  <div class="ov-label">TOTAL FUNDING</div>
+  <div class="ov-label">TOTAL POINTS</div>
   <div class="ov-team" id="ov-team-name"></div>
-  <div class="ov-amount-wrap">
-    <div class="ov-amount" id="ov-amount">0</div>
-    <div class="ov-currency">KRW</div>
-  </div>
+  <div class="ov-amount" id="ov-amount">0</div>
   <div class="ov-close-hint">CLICK ANYWHERE TO CLOSE</div>
 </div>
 
@@ -576,7 +557,9 @@ async function apiFetch() {
 
   const list = ranking
     .map(r => {
-      const name = String(r["팀명"] ?? "").trim();
+      const name = String(r["팀명"] ?? "")
+        .replace(/\s+/g, ' ')
+        .trim();
       if (!name) return null;
 
       return {
@@ -587,7 +570,6 @@ async function apiFetch() {
       };
     })
     .filter(Boolean)
-    /* ★ 수정: 중복 팀명 합산 처리 */
     .reduce((acc, cur) => {
       const exists = acc.find(t => t.id === cur.id);
       if (exists) {
@@ -603,7 +585,6 @@ async function apiFetch() {
       return a.팀명.localeCompare(b.팀명, 'ko');
     })
     .reduce((acc, row, i) => {
-      // 동점이면 같은 순위, 다음 순위는 건너뜀 (1,2,2,4 방식)
       let 순위;
       if (i === 0) {
         순위 = 1;
@@ -665,21 +646,24 @@ function render(list) {
   const board = document.getElementById('board');
   const max = Math.max(...list.map(t => t.pts), 1);
 
-  // STEP 1: DOM 재배치 전 위치 스냅샷
   const first = snap();
 
-  // STEP 2: 기존 row 맵 수집
+  // 순위가 올라가는 팀만 이동 애니메이션 중 앞쪽 레이어로 보이게 한다.
+  const movingUpIds = new Set(
+    list
+      .filter(team => prevRank[team.id] != null && team.순위 < prevRank[team.id])
+      .map(team => team.id)
+  );
+
   const existing = {};
   board.querySelectorAll('.row[data-id]').forEach(el => {
     existing[el.dataset.id] = el;
   });
 
-  // STEP 3: 사라진 팀 제거
   Object.keys(existing).forEach(id => {
     if (!list.find(t => t.id === id)) existing[id].remove();
   });
 
-  // STEP 4: 내용 업데이트 (DOM 순서 변경 없이)
   list.forEach((team) => {
     const rank = team.순위;
     const id = team.id;
@@ -691,9 +675,13 @@ function render(list) {
       row.className = 'row';
       row.dataset.id = id;
       row.innerHTML = rowHTML(team, rank, pct);
-      row.addEventListener('click', () => openFunding(team));
-      dispScore[id] = team.pts;
+      row.addEventListener('click', () => openFunding(id, row.querySelector('.t-name').textContent));
+      dispScore[id] = 0;
       existing[id] = row;
+      const newScoreEl = row.querySelector('.score-val');
+      newScoreEl.textContent = '0';
+      if (team.pts > 0) countUp(id, 0, team.pts, newScoreEl);
+      else dispScore[id] = 0;
     } else {
       const scoreEl = row.querySelector('.score-val');
       const from = dispScore[id] ?? team.pts;
@@ -726,12 +714,10 @@ function render(list) {
     }
   });
 
-  // STEP 5: DOM 순서를 올바른 순위대로 한번에 재배치
   list.forEach((team) => {
     board.appendChild(existing[team.id]);
   });
 
-  // STEP 6: 재배치 후 위치 스냅샷 → FLIP 애니메이션
   const last = snap();
   Object.keys(last).forEach(id => {
     const el = existing[id];
@@ -739,12 +725,34 @@ function render(list) {
     const dy = (first[id] ?? last[id]) - last[id];
     if (Math.abs(dy) < 0.5) return;
 
+    // FLIP 애니메이션 안정화:
+    // 새 순서로 이동한 row를 먼저 예전 위치처럼 되돌려 놓고,
+    // 브라우저가 그 상태를 계산한 다음 transform을 풀어야 모션이 보인다.
+    const shouldMoveFront = movingUpIds.has(id);
+    if (shouldMoveFront) el.classList.add('moving-front');
+
     el.style.transition = 'none';
     el.style.transform = `translateY(${dy}px)`;
+
+    // 강제 리플로우: 이 줄이 없으면 일부 브라우저에서 중간 상태를 그리지 않고
+    // 최종 위치로 바로 붙어버릴 수 있다.
+    el.getBoundingClientRect();
+
     requestAnimationFrame(() => {
       el.style.transition = 'transform 0.6s cubic-bezier(0.22,1,0.36,1)';
-      el.style.transform = '';
+      el.style.transform = 'translateY(0)';
     });
+
+    const cleanup = (e) => {
+      if (e && e.propertyName !== 'transform') return;
+      if (shouldMoveFront) el.classList.remove('moving-front');
+      el.style.transition = '';
+      el.style.transform = '';
+      el.removeEventListener('transitionend', cleanup);
+    };
+
+    el.addEventListener('transitionend', cleanup);
+    setTimeout(() => cleanup(), 750);
   });
 
   list.forEach((t) => {
@@ -805,13 +813,13 @@ async function tick() {
     } else {
       render(list);
       updateStats(list);
+      syncOverlay(list);
     }
 
     setDot('ok');
   } catch (e) {
     console.error('[leaderboard]', e);
     setDot('err');
-    /* ★ 수정: alert 제거 — 행사 화면에서 팝업이 뜨지 않도록 dot 색상으로만 에러 표시 */
   } finally {
     busy = false;
   }
@@ -819,36 +827,57 @@ async function tick() {
 
 /* ── FUNDING OVERLAY LOGIC ── */
 let ovRaf = null;
+let activeOverlayId = null;
 
-function openFunding(team) {
+function openFunding(id, teamName) {
   const overlay = document.getElementById('funding-overlay');
-  document.getElementById('ov-team-name').textContent = team['팀명'];
+  document.getElementById('ov-team-name').textContent = teamName;
+  activeOverlayId = id;
 
   const amountEl = document.getElementById('ov-amount');
-  const target = team.pts;
+  const target = dispScore[id] ?? 0;
 
-  // 카운트업 애니메이션
+  animateOverlayAmount(amountEl, 0, target);
+  overlay.classList.add('visible');
+}
+
+function animateOverlayAmount(el, from, to) {
   if (ovRaf) cancelAnimationFrame(ovRaf);
+  if (from === to) { el.textContent = to.toLocaleString(); return; }
+
   const t0 = performance.now();
-  const dur = 900;
+  const dur = 700;
 
   (function step(now) {
     const p = Math.min(1, (now - t0) / dur);
     const e = 1 - Math.pow(1 - p, 3);
-    amountEl.textContent = Math.round(target * e).toLocaleString();
+    el.textContent = Math.round(from + (to - from) * e).toLocaleString();
     if (p < 1) {
       ovRaf = requestAnimationFrame(step);
     } else {
-      amountEl.textContent = target.toLocaleString();
+      el.textContent = to.toLocaleString();
     }
   })(t0);
+}
 
-  overlay.classList.add('visible');
+function syncOverlay(list) {
+  if (!activeOverlayId) return;
+  const overlay = document.getElementById('funding-overlay');
+  if (!overlay.classList.contains('visible')) return;
+
+  const team = list.find(t => t.id === activeOverlayId);
+  if (!team) return;
+
+  const amountEl = document.getElementById('ov-amount');
+  const current = parseInt(amountEl.textContent.replace(/,/g, ''), 10) || 0;
+  const next = team.pts;
+  if (current !== next) animateOverlayAmount(amountEl, current, next);
 }
 
 function closeFunding() {
   const overlay = document.getElementById('funding-overlay');
   overlay.classList.remove('visible');
+  activeOverlayId = null;
   if (ovRaf) { cancelAnimationFrame(ovRaf); ovRaf = null; }
 }
 
