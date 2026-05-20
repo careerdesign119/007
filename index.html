@@ -125,14 +125,14 @@ body::after {
 
 #board {
   width: 100%;
-  max-width: 760px;
+  max-width: 860px;
   display: flex;
   flex-direction: column;
 }
 
 .col-header {
   display: grid;
-  grid-template-columns: 44px 1fr 80px;
+  grid-template-columns: 44px minmax(0, 1fr) 160px;
   gap: 0.9rem;
   padding: 0 1.1rem 0 0.9rem;
   margin-bottom: 0.55rem;
@@ -153,7 +153,7 @@ body::after {
 .row {
   position: relative;
   display: grid;
-  grid-template-columns: 44px 1fr 80px;
+  grid-template-columns: 44px minmax(0, 1fr) 160px;
   align-items: center;
   gap: 0.9rem;
   padding: 0.65rem 1.1rem 0.65rem 0.9rem;
@@ -359,13 +359,17 @@ body::after {
 .score-cell {
   text-align: right;
   flex-shrink: 0;
+  min-width: 160px;
+  overflow: visible;
 }
 
 .score-val {
   font-family: 'Bebas Neue', sans-serif;
-  font-size: 2rem;
+  font-size: clamp(1.7rem, 3.8vw, 2rem);
   line-height: 1;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
   transition: color 0.4s;
 }
 
@@ -419,14 +423,48 @@ body::after {
 }
 
 @media (max-width: 500px) {
+  .col-header {
+    grid-template-columns: 38px minmax(0, 1fr) 120px;
+    gap: 0.55rem;
+    padding: 0 0.8rem;
+  }
+
   .row {
-    grid-template-columns: 38px 1fr 64px;
-    gap: 0.6rem;
+    grid-template-columns: 38px minmax(0, 1fr) 120px;
+    gap: 0.55rem;
     padding: 0.55rem 0.8rem;
   }
 
-  .score-val { font-size: 1.6rem; }
+  .score-cell { min-width: 120px; }
+  .score-val {
+    font-size: 1.35rem;
+    letter-spacing: 0.01em;
+  }
   .rank-num  { font-size: 1.5rem; }
+}
+
+@media (max-width: 380px) {
+  #app { padding-left: 0.75rem; padding-right: 0.75rem; }
+
+  .col-header {
+    grid-template-columns: 34px minmax(0, 1fr) 110px;
+    gap: 0.45rem;
+    padding: 0 0.65rem;
+  }
+
+  .row {
+    grid-template-columns: 34px minmax(0, 1fr) 110px;
+    gap: 0.45rem;
+    padding: 0.5rem 0.65rem;
+  }
+
+  .rank-cell { width: 34px; }
+  .score-cell { min-width: 110px; }
+  .score-val {
+    font-size: 1.22rem;
+    letter-spacing: 0;
+  }
+  .rank-num { font-size: 1.35rem; }
 }
 
 /* ── FUNDING OVERLAY ── */
@@ -471,9 +509,12 @@ body::after {
 
 .ov-amount {
   font-family: 'Bebas Neue', sans-serif;
-  font-size: clamp(4rem, 16vw, 11rem);
+  font-size: clamp(3.2rem, 12vw, 11rem);
   line-height: 1;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
+  max-width: 96vw;
+  white-space: nowrap;
+  text-align: center;
   background: linear-gradient(160deg, #ffb347 0%, #ff6a00 55%, #c94b00 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -537,6 +578,14 @@ let dispScore = {};
 let rafs      = {};
 let ticks     = 0;
 let busy      = false;
+
+function formatPoints(value) {
+  return Math.round(Number(value) || 0).toLocaleString('ko-KR');
+}
+
+function parsePoints(value) {
+  return parseInt(String(value ?? '0').replace(/,/g, ''), 10) || 0;
+}
 
 async function apiFetch() {
   const url = `${API_URL}?action=init&_ts=${Date.now()}`;
@@ -612,7 +661,7 @@ function countUp(id, from, to, el) {
   if (rafs[id]) cancelAnimationFrame(rafs[id]);
 
   if (from === to) {
-    el.textContent = to;
+    el.textContent = formatPoints(to);
     dispScore[id] = to;
     return;
   }
@@ -623,12 +672,12 @@ function countUp(id, from, to, el) {
   (function step(now) {
     const p = Math.min(1, (now - t0) / dur);
     const e = 1 - Math.pow(1 - p, 3);
-    el.textContent = Math.round(from + (to - from) * e);
+    el.textContent = formatPoints(Math.round(from + (to - from) * e));
 
     if (p < 1) {
       rafs[id] = requestAnimationFrame(step);
     } else {
-      el.textContent = to;
+      el.textContent = formatPoints(to);
       dispScore[id] = to;
     }
   })(t0);
@@ -679,7 +728,7 @@ function render(list) {
       dispScore[id] = 0;
       existing[id] = row;
       const newScoreEl = row.querySelector('.score-val');
-      newScoreEl.textContent = '0';
+      newScoreEl.textContent = formatPoints(0);
       if (team.pts > 0) countUp(id, 0, team.pts, newScoreEl);
       else dispScore[id] = 0;
     } else {
@@ -783,7 +832,7 @@ function rowHTML(t, rank, pct) {
     </div>
   </div>
   <div class="score-cell">
-    <div class="score-val">${t.pts}</div>
+    <div class="score-val">${formatPoints(t.pts)}</div>
     <div class="score-lbl">points</div>
   </div>`;
 }
@@ -791,8 +840,8 @@ function rowHTML(t, rank, pct) {
 function updateStats(list) {
   const tot = list.reduce((s, t) => s + t.pts, 0);
   document.getElementById('s-teams').textContent = list.length;
-  document.getElementById('s-top').textContent = list[0]?.pts ?? '—';
-  document.getElementById('s-total').textContent = tot;
+  document.getElementById('s-top').textContent = list[0] ? formatPoints(list[0].pts) : '—';
+  document.getElementById('s-total').textContent = formatPoints(tot);
   document.getElementById('s-tick').textContent = ++ticks;
 }
 
@@ -843,7 +892,7 @@ function openFunding(id, teamName) {
 
 function animateOverlayAmount(el, from, to) {
   if (ovRaf) cancelAnimationFrame(ovRaf);
-  if (from === to) { el.textContent = to.toLocaleString(); return; }
+  if (from === to) { el.textContent = formatPoints(to); return; }
 
   const t0 = performance.now();
   const dur = 700;
@@ -851,11 +900,11 @@ function animateOverlayAmount(el, from, to) {
   (function step(now) {
     const p = Math.min(1, (now - t0) / dur);
     const e = 1 - Math.pow(1 - p, 3);
-    el.textContent = Math.round(from + (to - from) * e).toLocaleString();
+    el.textContent = formatPoints(Math.round(from + (to - from) * e));
     if (p < 1) {
       ovRaf = requestAnimationFrame(step);
     } else {
-      el.textContent = to.toLocaleString();
+      el.textContent = formatPoints(to);
     }
   })(t0);
 }
@@ -869,7 +918,7 @@ function syncOverlay(list) {
   if (!team) return;
 
   const amountEl = document.getElementById('ov-amount');
-  const current = parseInt(amountEl.textContent.replace(/,/g, ''), 10) || 0;
+  const current = parsePoints(amountEl.textContent);
   const next = team.pts;
   if (current !== next) animateOverlayAmount(amountEl, current, next);
 }
